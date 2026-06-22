@@ -1,0 +1,27 @@
+{
+  "name": "ai-booking-assistant",
+  "version": "1.0.0",
+  "description": "AI Booking Assistant — WhatsApp-powered booking system with OpenAI tool calling",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "migrate": "node sql/migrate.js",
+    "seed": "node sql/seed.js",
+    "test": "jest --verbose"
+  },
+  "keywords": ["whatsapp", "booking", "openai", "express"],
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "mysql2": "^3.11.0",
+    "node-cron": "^3.0.3",
+    "openai": "^4.60.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0"
+  }
+}
