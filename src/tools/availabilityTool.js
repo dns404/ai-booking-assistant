@@ -50,11 +50,48 @@ async function checkAvailability(serviceName, date, time) {
   const [rows] = await pool.execute(query, params);
 
   if (rows.length === 0) {
+    // No exact match — fetch all available slots for this service on the same date
+    const [allDaySlots] = await pool.execute(
+      `SELECT slot_datetime FROM availability_slots
+       WHERE service_id = ? AND DATE(slot_datetime) = ? AND is_booked = FALSE
+       ORDER BY slot_datetime LIMIT 15`,
+      [service.id, date]
+    );
+
+    if (allDaySlots.length > 0) {
+      const availableSlots = allDaySlots.map((r) => {
+        const dt = new Date(r.slot_datetime);
+        return dt.toISOString().slice(0, 16).replace('T', ' ');
+      });
+
+      return {
+        available: false,
+        service: service.name,
+        date,
+        message: `No slots for ${service.name} around ${time} on ${date}, but other slots are available on the same day.`,
+        available_slots: availableSlots,
+      };
+    }
+
+    // No slots at all on that date — check the next 3 days
+    const [nearbySlots] = await pool.execute(
+      `SELECT slot_datetime FROM availability_slots
+       WHERE service_id = ? AND DATE(slot_datetime) > ? AND is_booked = FALSE
+       ORDER BY slot_datetime LIMIT 10`,
+      [service.id, date]
+    );
+
+    const nearbyList = nearbySlots.map((r) => {
+      const dt = new Date(r.slot_datetime);
+      return dt.toISOString().slice(0, 16).replace('T', ' ');
+    });
+
     return {
       available: false,
       service: service.name,
       date,
-      message: `No available slots for ${service.name} on ${date}${time ? ' around ' + time : ''}.`,
+      message: `No available slots for ${service.name} on ${date}.${nearbyList.length > 0 ? ' Here are the nearest available slots:' : ' No upcoming slots found.'}`,
+      available_slots: nearbyList,
     };
   }
 
