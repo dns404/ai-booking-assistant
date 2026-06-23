@@ -2,8 +2,8 @@
  * bookingAgent.js
  *
  * Gemini-powered booking agent using function/tool calling.
- * The model decides which tool to invoke; we execute the tool and feed
- * the result back until the model produces a final text reply.
+ * Uses generateContent directly (not the Chat API) for full control
+ * over the contents array, avoiding empty-parts errors.
  */
 const { GoogleGenAI } = require('@google/genai');
 const config = require('../config/config');
@@ -105,101 +105,125 @@ async function executeTool(name, args) {
   }
 }
 
-// ─── Convert stored history to Gemini format ────────────────
+// ─── Build Gemini contents from stored history ──────────────
 /**
- * Gemini expects: [{ role: 'user', parts: [...] }, { role: 'model', parts: [...] }]
- * Rules:
- *   - Every part must have non-empty text (otherwise Gemini throws INVALID_ARGUMENT)
+ * Convert our stored history [{role, content}] to Gemini contents format.
+ * Gemini requires:
+ *   - Every part must have non-empty text
  *   - Roles must alternate between 'user' and 'model'
- *   - Our stored history uses 'assistant' → mapped to 'model'
+ *   - History must start with 'user'
  */
-function toGeminiHistory(messageHistory) {
-  const geminiHistory = [];
+function buildGeminiContents(messageHistory) {
+  const contents = [];
 
   for (const msg of messageHistory) {
-    // Skip tool messages, status messages, or messages with empty/null content
-    if (!msg.content || msg.content.trim() === '') continue;
+    // Skip messages with empty/null/whitespace content
+    if (!msg.content || (typeof msg.content === 'string' && msg.content.trim() === '')) continue;
+
+    // Only process user and assistant roles
     if (msg.role !== 'user' && msg.role !== 'assistant') continue;
 
     const geminiRole = msg.role === 'assistant' ? 'model' : 'user';
 
-    // Gemini requires alternating roles — merge if same role appears consecutively
-    const lastEntry = geminiHistory[geminiHistory.length - 1];
+    // Gemini requires alternating roles — merge consecutive same-role messages
+    const lastEntry = contents[contents.length - 1];
     if (lastEntry && lastEntry.role === geminiRole) {
-      // Append to existing entry's text
       lastEntry.parts[0].text += '\n' + msg.content;
     } else {
-      geminiHistory.push({ role: geminiRole, parts: [{ text: msg.content }] });
+      contents.push({ role: geminiRole, parts: [{ text: msg.content }] });
     }
   }
 
-  // Gemini history must start with 'user' — drop leading 'model' messages if any
-  while (geminiHistory.length > 0 && geminiHistory[0].role === 'model') {
-    geminiHistory.shift();
+  // History must start with 'user'
+  while (contents.length > 0 && contents[0].role === 'model') {
+    contents.shift();
   }
 
-  return geminiHistory;
-}
+  // History must end with 'user' for generateContent to work
+  // (Gemini expects the last message to be the user's turn)
+  // If it ends with 'model', that's fine — the last user message was already processed
 
+  return contents;
+}
 
 // ─── Main agent loop ────────────────────────────────────────
 /**
- * Run the booking agent.
+ * Run the booking agent using generateContent directly.
  * @param {Array} messageHistory — array of {role, content} objects
  * @returns {{ reply: string, updatedHistory: Array }}
  */
 async function runBookingAgent(messageHistory) {
-  // Separate the latest user message from history
-  const lastMessage = messageHistory[messageHistory.length - 1];
-  const previousHistory = messageHistory.slice(0, -1);
+  // Build the contents array from full history
+  const contents = buildGeminiContents(messageHistory);
 
-  // Convert prior messages to Gemini format for context
-  const geminiHistory = toGeminiHistory(previousHistory);
-  console.log(config.gemini.model);
+  if (contents.length === 0) {
+    return {
+      reply: "Hi! 😊 Welcome to our salon. How can I help you today?",
+      updatedHistory: [...messageHistory, { role: 'assistant', content: "Hi! 😊 Welcome to our salon. How can I help you today?" }],
+    };
+  }
 
-  // Create a chat session
-  const chat = ai.chats.create({
-    model: config.gemini.model,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      tools,
-    },
-    history: geminiHistory,
-  });
-
-  // Allow up to 5 tool-call rounds to prevent infinite loops
+  // Allow up to 5 tool-call rounds
   const MAX_ROUNDS = 5;
-  let currentInput = lastMessage.content;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const response = await chat.sendMessage({ message: currentInput });
+    console.log(`🔄 Round ${round + 1} | Contents length: ${contents.length}`);
 
-    // Check if the model wants to call a function
-    const functionCalls = response.functionCalls;
+    const response = await ai.models.generateContent({
+      model: config.gemini.model,
+      contents,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        tools,
+      },
+    });
 
-    if (functionCalls && functionCalls.length > 0) {
-      // Process each function call
-      const functionResponses = [];
+    // Check for function calls
+    const candidate = response.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
 
+    const functionCalls = parts.filter(p => p.functionCall);
+    const textParts = parts.filter(p => p.text);
+
+    if (functionCalls.length > 0) {
+      // Add the model's function-call response to contents
+      contents.push({
+        role: 'model',
+        parts: functionCalls.map(p => ({
+          functionCall: p.functionCall,
+        })),
+      });
+
+      // Execute each function call and build function responses
+      const functionResponseParts = [];
       for (const fc of functionCalls) {
-        console.log(`🔧 Tool call: ${fc.name}`, fc.args);
-        const result = await executeTool(fc.name, fc.args);
+        const { name, args } = fc.functionCall;
+        console.log(`🔧 Tool call: ${name}`, args);
 
-        functionResponses.push({
-          name: fc.name,
-          response: result,
+        const result = await executeTool(name, args);
+
+        functionResponseParts.push({
+          functionResponse: {
+            name,
+            response: result,
+          },
         });
       }
 
-      // Send function results back as the next input
-      currentInput = { functionResponses };
+      // Add function responses as a user turn
+      contents.push({
+        role: 'user',
+        parts: functionResponseParts,
+      });
+
+      // Loop again for the model to process the results
       continue;
     }
 
     // Model produced a final text reply
-    const reply = response.text || '';
+    const reply = textParts.map(p => p.text).join('') || '';
 
-    // Build updated history for storage
+    // Store only user/assistant messages (not tool call internals)
     const updatedHistory = [
       ...messageHistory,
       { role: 'assistant', content: reply },
@@ -208,7 +232,7 @@ async function runBookingAgent(messageHistory) {
     return { reply, updatedHistory };
   }
 
-  // Fallback if we hit max rounds
+  // Fallback
   return {
     reply: "I'm sorry, I couldn't complete your request right now. Please try again.",
     updatedHistory: messageHistory,
