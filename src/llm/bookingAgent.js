@@ -186,13 +186,8 @@ async function runBookingAgent(messageHistory) {
     const textParts = parts.filter(p => p.text);
 
     if (functionCalls.length > 0) {
-      // Add the model's function-call response to contents
-      contents.push({
-        role: 'model',
-        parts: functionCalls.map(p => ({
-          functionCall: p.functionCall,
-        })),
-      });
+      // Add the model's FULL response to contents (preserves thought_signature)
+      contents.push(candidate.content);
 
       // Execute each function call and build function responses
       const functionResponseParts = [];
