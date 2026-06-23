@@ -196,6 +196,8 @@ async function runBookingAgent(messageHistory) {
         console.log(`🔧 Tool call: ${name}`, args);
 
         const result = await executeTool(name, args);
+        console.log(result);
+
 
         functionResponseParts.push({
           functionResponse: {

@@ -31,7 +31,7 @@ async function checkAvailability(serviceName, date, time) {
 
   // Build query for open slots on the given date
   let query = `
-    SELECT slot_datetime
+    SELECT date_format(slot_datetime,"%Y-%m-%d %H:%i:%s") slot_datetime
     FROM availability_slots
     WHERE service_id = ?
       AND DATE(slot_datetime) = ?
@@ -47,16 +47,24 @@ async function checkAvailability(serviceName, date, time) {
 
   query += ' ORDER BY slot_datetime LIMIT 10';
 
+
+  console.log('query', query);
+  console.log('params', params);
+
   const [rows] = await pool.execute(query, params);
+
+  console.log('rows', rows);
 
   if (rows.length === 0) {
     // No exact match — fetch all available slots for this service on the same date
     const [allDaySlots] = await pool.execute(
-      `SELECT slot_datetime FROM availability_slots
+      `SELECT date_format(slot_datetime,"%Y-%m-%d %H:%i:%s") slot_datetime FROM availability_slots
        WHERE service_id = ? AND DATE(slot_datetime) = ? AND is_booked = FALSE
        ORDER BY slot_datetime LIMIT 15`,
       [service.id, date]
     );
+    console.log('allDaySlots', allDaySlots);
+
 
     if (allDaySlots.length > 0) {
       const availableSlots = allDaySlots.map((r) => {
@@ -75,7 +83,7 @@ async function checkAvailability(serviceName, date, time) {
 
     // No slots at all on that date — check the next 3 days
     const [nearbySlots] = await pool.execute(
-      `SELECT slot_datetime FROM availability_slots
+      `SELECT date_format(slot_datetime,"%Y-%m-%d %H:%i:%s") slot_datetime FROM availability_slots
        WHERE service_id = ? AND DATE(slot_datetime) > ? AND is_booked = FALSE
        ORDER BY slot_datetime LIMIT 10`,
       [service.id, date]
@@ -96,9 +104,10 @@ async function checkAvailability(serviceName, date, time) {
   }
 
   const slots = rows.map((r) => {
-    const dt = new Date(r.slot_datetime);
-    return dt.toISOString().slice(0, 16).replace('T', ' ');
+    // const dt = new Date(r.slot_datetime);
+    return r.slot_datetime;
   });
+  console.log('slots', slots);
 
   return {
     available: true,
