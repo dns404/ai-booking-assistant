@@ -10,15 +10,20 @@
     "seed": "node sql/seed.js",
     "test": "jest --verbose"
   },
-  "keywords": ["whatsapp", "booking", "openai", "express"],
+  "keywords": [
+    "whatsapp",
+    "booking",
+    "openai",
+    "express"
+  ],
   "license": "MIT",
   "dependencies": {
+    "@google/genai": "^2.9.0",
     "axios": "^1.7.0",
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
     "mysql2": "^3.11.0",
-    "node-cron": "^3.0.3",
-    "openai": "^4.60.0"
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "jest": "^29.7.0",

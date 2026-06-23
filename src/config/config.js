@@ -22,9 +22,9 @@ module.exports = {
     apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
   },
 
-  // ─── OpenAI ───
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+  // ─── Google Gemini ───
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
   },
 };
